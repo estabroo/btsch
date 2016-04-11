@@ -1,5 +1,5 @@
 SRC=btsch.c
-VERSION=0.1
+VERSION=0.2
 DIST_DIR=btsch-$(VERSION)
 
 btsch: $(SRC)
@@ -20,7 +20,7 @@ dist:
 	@$(RM) -rf $(DIST_DIR)
 	@mkdir $(DIST_DIR)
 	@cp -a $(SRC) $(DIST_DIR)
-	@cp -a Makefile $(DIST_DIR)
+	@cp -a Makefile Readme $(DIST_DIR)
 	tar -czvf $(DIST_DIR).tar.gz $(DIST_DIR)
 	sha1sum $(DIST_DIR).tar.gz > $(DIST_DIR).tar.gz.sha1sum
 	@$(RM) -rf $(DIST_DIR)
