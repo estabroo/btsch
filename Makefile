@@ -5,15 +5,17 @@ DIST_DIR=btsch-$(VERSION)
 btsch: $(SRC)
 	$(CC) -o $@ $?
 
+btsch_debug: $(SRC)
+	$(CC) -g -DBTSCH_DEBUG -o $@ $?
+
 .PHONY: debug
-debug: $(SRC)
-	$(RM) btsch_debug
-	$(CC) -g -DBTSCH_DEBUG -o btsch_debug $?
+debug: btsch_debug
 
 .PHONY: clean
 clean:
 	$(RM) btsch btsch_debug btsch.o
 
+.PHONY: dist
 dist:
 	@$(RM) -rf $(DIST_DIR)
 	@mkdir $(DIST_DIR)
@@ -22,3 +24,7 @@ dist:
 	tar -czvf $(DIST_DIR).tar.gz $(DIST_DIR)
 	sha1sum $(DIST_DIR).tar.gz > $(DIST_DIR).tar.gz.sha1sum
 	@$(RM) -rf $(DIST_DIR)
+
+.PHONY: dist_clean
+dist_clean: clean
+	$(RM) $(DIST_DIR).tar.gz $(DIST_DIR).tar.gz.sha1sum
