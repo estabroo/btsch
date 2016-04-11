@@ -1,0 +1,17 @@
+Pull out sections between timestamps in mysql log files.  btsch uses a binary search to find the timestamps in the log file and then dumps the relevant logs [start, stop)
+
+If no output filename is given it'll dump to stdout.  If you are running the debug version, the debug output is all send to stderr.
+
+
+usage: ./btsch start_time stop_time input_filename [output_filename]
+        start and stop times are in the format of 'YYMMDD hh:mm:ss'
+        use 0 for start time to start at the beginning of file
+        this tool uses strptime which will blow up in 2068
+
+Example:
+
+./btsch '160409 7:04:19' '160409 7:04:20' mysql.log | less
+
+
+
+If you have a compiler you should be able to just do make or make debug to create the program.
