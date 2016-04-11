@@ -35,13 +35,11 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
     off_t     total_bytes_read = 0;
     char*     ptr;
     time_t    ts;
-    int       loops = 0;
     char      date[20];
 
 
     memset(date, 0, sizeof(date));
     for (;;) {
-        loops += 1;
         read = pread(fd, search_buffer, sizeof(search_buffer), pos);
         if (read <= 0) {
             perror("read failed");
@@ -49,7 +47,9 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
         }
         total_bytes_read += read;
         for (i=0; i < search_buffer_size; i++) {
-            if ((search_buffer[i] == '\n') && (search_buffer[i+1] != '\t') && (search_buffer[i+16] == '\t')) {
+            if ((search_buffer[i] == '\n') &&
+                (search_buffer[i+1] != '\t') &&
+                (search_buffer[i+16] == '\t')) {
                 /* convert start time to epoch */
                 memset(&conv, 0, sizeof(conv));
                 ptr = strptime(&search_buffer[i+1], "%y%m%d%n%T", &conv);
@@ -74,14 +74,17 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
     off_t    mid;
     off_t    low = 0;
     off_t    high = st_size;
+    off_t    offset;
+    int      i;
+    int      bytes;
     int      err;
-    int      matched = 0;
-    int      loops = 0;
+    int      read_bytes;
     uint64_t total_bytes = 0;
     ts_off_t ts_info;
+    ts_off_t ts_last;
+    ts_off_t ts_start;
 
-    while (!matched) {
-        loops += 1;
+    for (;;) {
         mid = (low + high) / 2;
         if ((mid == low) || (mid == high)) {
             fprintf(stderr, "start not found\n");
@@ -92,17 +95,59 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
             fprintf(stderr, "start not found\n");
             exit(0);
         }
-        fprintf(stderr, "%ld %ld %ld %ld %ld\n", low, high, mid, start, ts_info.ts);
         total_bytes += ts_info.bytes;
         if (ts_info.ts > start) {
             high = mid;
         } else if (ts_info.ts < start) {
             low = mid;
         } else {
-            fprintf(stderr, "found timestamp at %ld %d %ld\n", ts_info.offset, loops, total_bytes);
-            exit(0);
+            fprintf(stderr, "found timestamp at %ld %ld\n", ts_info.offset, total_bytes);
+            ts_start = ts_info;
+            break;
         }
     }
+    low = mid;
+    high = st_size;
+    for (;;) {
+        mid = (low + high) / 2;
+        if ((mid == low) || (mid == high)) {
+            break;
+        }
+        err = get_next_timestamp(mid, in_fd, &ts_info);
+        if (err) {
+            fprintf(stderr, "stop not found, using %ld\n", ts_last.ts);
+            break;
+        }
+        total_bytes += ts_info.bytes;
+        if (ts_info.ts > stop) {
+            ts_last = ts_info;
+            high = mid;
+        } else if (ts_info.ts < stop) {
+            low = mid;
+        } else {
+            fprintf(stderr, "found stop timestamp at %ld %ld\n", ts_info.offset, total_bytes);
+            ts_last = ts_info;
+            break;
+        }
+    }
+
+    total_bytes = ts_last.offset - ts_start.offset;
+    fprintf(stderr, "total_bytes = %ld\n", total_bytes);
+    offset = ts_start.offset;
+    for (i=0; i < total_bytes;) {
+        read_bytes = total_bytes - i;
+        if (read_bytes > sizeof(search_buffer)) {
+            read_bytes = sizeof(search_buffer);
+        }
+        bytes = pread(in_fd, search_buffer, read_bytes, offset);
+        if (bytes <= 0) {
+            break;
+        }
+        fwrite(search_buffer, bytes, 1, out_f);
+        offset += bytes;
+        i += bytes;
+    }
+    return 0;
 }
 
 
