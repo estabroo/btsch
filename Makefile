@@ -4,7 +4,7 @@ btsch: btsch.c
 .PHONY: debug
 debug: btsch.c
 	$(RM) btsch_debug
-	$(CC) -DBTSCH_DEBUG -o btsch_debug $?
+	$(CC) -g -DBTSCH_DEBUG -o btsch_debug $?
 
 .PHONY: clean
 clean:
