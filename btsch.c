@@ -84,6 +84,9 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
     ts_off_t ts_last;
     ts_off_t ts_start;
 
+    ts_last.ts = 0;
+    ts_last.offset = st_size;
+
     for (;;) {
         mid = (low + high) / 2;
         if ((mid == low) || (mid == high)) {
@@ -184,6 +187,11 @@ int main(int argc, char* argv[])
         //return 1;
     }
     stop = mktime(&conv);
+
+    if (stop < start) {
+        fprintf(stderr, "stop is less than start\n");
+        return 1;
+    }
 
     /* setup output */
     if (argc == 4) {
