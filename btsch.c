@@ -187,6 +187,7 @@ int main(int argc, char* argv[])
     if ((argc != 4) && (argc != 5)) {
         fprintf(stderr, "usage: %s start_time stop_time input_filename [output_filename]\n", argv[0]);
         fprintf(stderr, "\tstart and stop times are in the format of 'YYMMDD hh:mm:ss'\n");
+        fprintf(stderr, "\tuse 0 for start time to start at the beginning of file\n");
         fprintf(stderr, "\tthis tool uses strptime which will blow up in 2068\n");
         return 2;
     }
