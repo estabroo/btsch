@@ -35,18 +35,21 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
     off_t     total_bytes_read = 0;
     char*     ptr;
     time_t    ts;
+#ifdef BTSCH_DEBUG
     char      date[20];
+#endif
 
 
+#ifdef BTSCH_DEBUG
     memset(date, 0, sizeof(date));
+#endif
     for (;;) {
         read = pread(fd, search_buffer, sizeof(search_buffer), pos);
         if (read <= 0) {
-            perror("read failed");
             return -1;
         }
         total_bytes_read += read;
-        for (i=0; i < search_buffer_size; i++) {
+        for (i=0; i < (read - 16); i++) {
             if ((search_buffer[i] == '\n') &&
                 (search_buffer[i+1] != '\t') &&
                 (search_buffer[i+16] == '\t')) {
@@ -54,8 +57,10 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
                 memset(&conv, 0, sizeof(conv));
                 ptr = strptime(&search_buffer[i+1], "%y%m%d%n%T", &conv);
                 if (ptr == (char*)&(search_buffer[i+16])) {
+#ifdef BTSCH_DEBUG
                     memcpy(date, &search_buffer[i+1], 18);
                     fprintf(stderr, "ts = %s\n", date);
+#endif
                     ts = mktime(&conv);
                     ts_info->ts = ts;
                     ts_info->offset = pos + i + 1;
@@ -71,7 +76,7 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
 
 int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
 {
-    off_t    mid;
+    off_t    mid = 0;
     off_t    low = 0;
     off_t    high = st_size;
     off_t    offset;
@@ -86,27 +91,33 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
 
     ts_last.ts = 0;
     ts_last.offset = st_size;
+    ts_start.ts = 0;
+    ts_start.offset = 0;
 
-    for (;;) {
-        mid = (low + high) / 2;
-        if ((mid == low) || (mid == high)) {
-            fprintf(stderr, "start not found\n");
-            exit(0);
-        }
-        err = get_next_timestamp(mid, in_fd, &ts_info);
-        if (err) {
-            fprintf(stderr, "start not found\n");
-            exit(0);
-        }
-        total_bytes += ts_info.bytes;
-        if (ts_info.ts > start) {
-            high = mid;
-        } else if (ts_info.ts < start) {
-            low = mid;
-        } else {
-            fprintf(stderr, "found timestamp at %ld %ld\n", ts_info.offset, total_bytes);
-            ts_start = ts_info;
-            break;
+    if (start > 0) {
+        for (;;) {
+            mid = (low + high) / 2;
+            if ((mid == low) || (mid == high)) {
+                fprintf(stderr, "start not found\n");
+                exit(0);
+            }
+            err = get_next_timestamp(mid, in_fd, &ts_info);
+            if (err) {
+                fprintf(stderr, "start not found\n");
+                exit(0);
+            }
+            total_bytes += ts_info.bytes;
+            if (ts_info.ts > start) {
+                high = mid;
+            } else if (ts_info.ts < start) {
+                low = mid;
+            } else {
+#ifdef BTSCH_DEBUG
+                fprintf(stderr, "found timestamp at %ld %ld\n", ts_info.offset, total_bytes);
+#endif
+                ts_start = ts_info;
+                break;
+            }
         }
     }
     low = mid;
@@ -118,7 +129,11 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
         }
         err = get_next_timestamp(mid, in_fd, &ts_info);
         if (err) {
-            fprintf(stderr, "stop not found, using %ld\n", ts_last.ts);
+            if (ts_last.ts == 0) {
+                fprintf(stderr, "stop not found, using end of file \n");
+            } else {
+                fprintf(stderr, "stop not found, using %ld\n", ts_last.ts);
+            }
             break;
         }
         total_bytes += ts_info.bytes;
@@ -128,14 +143,18 @@ int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
         } else if (ts_info.ts < stop) {
             low = mid;
         } else {
+#ifdef BTSCH_DEBUG
             fprintf(stderr, "found stop timestamp at %ld %ld\n", ts_info.offset, total_bytes);
+#endif
             ts_last = ts_info;
             break;
         }
     }
 
     total_bytes = ts_last.offset - ts_start.offset;
+#ifdef BTSCH_DEBUG
     fprintf(stderr, "total_bytes = %ld\n", total_bytes);
+#endif
     offset = ts_start.offset;
     for (i=0; i < total_bytes;) {
         read_bytes = total_bytes - i;
@@ -167,24 +186,30 @@ int main(int argc, char* argv[])
 
     if ((argc != 4) && (argc != 5)) {
         fprintf(stderr, "usage: %s start_time stop_time input_filename [output_filename]\n", argv[0]);
+        fprintf(stderr, "\tstart and stop times are in the format of 'YYMMDD hh:mm:ss'\n");
+        fprintf(stderr, "\tthis tool uses strptime which will blow up in 2068\n");
         return 2;
     }
 
     /* convert start time to epoch */
-    memset(&conv, 0, sizeof(conv));
-    ptr = strptime(argv[1], "%y%m%d%n%T", &conv);
-    if (ptr == (char*)NULL) {
-        perror("Couldn't convert start time");
-        return 1;
+    if (strcmp(argv[1], "0") != 0) {
+        memset(&conv, 0, sizeof(conv));
+        ptr = strptime(argv[1], "%y%m%d%n%T", &conv);
+        if (ptr == (char*)NULL) {
+            perror("Couldn't convert start time");
+            return 1;
+        }
+        start = mktime(&conv);
+    } else {
+        start = 0;
     }
-    start = mktime(&conv);
 
-    /* convert start time to epoch */
+    /* convert stop time to epoch */
     memset(&conv, 0, sizeof(conv));
     ptr = strptime(argv[2], "%y%m%d%n%T", &conv);
     if (ptr == (char*)NULL) {
-        //perror("Couldn't convert stop time");
-        //return 1;
+        perror("Couldn't convert stop time");
+        return 1;
     }
     stop = mktime(&conv);
 
