@@ -17,12 +17,15 @@
 #include <fcntl.h>
 
 
+/* search buffer size is a compromise between over-reading and system calls */
 uint8_t search_buffer[32*1024];  /* buffer to hold current junk */
-const int search_buffer_size = sizeof(search_buffer) - 16;
+
 
 typedef struct _ts_off_ {
     off_t    offset;
     time_t   ts;
+    off_t    nearest;
+    time_t   nearest_ts;
     uint64_t bytes;
 } ts_off_t;
 
@@ -30,26 +33,25 @@ typedef struct _ts_off_ {
 int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
 {
     struct tm conv;
-    int       i;
-    int       read;
+    int       bytes_read;
+    off_t     i;
     off_t     total_bytes_read = 0;
+    off_t     offset;
     char*     ptr;
     time_t    ts;
-#ifdef BTSCH_DEBUG
-    char      date[20];
-#endif
-
 
 #ifdef BTSCH_DEBUG
+    char      date[16];
     memset(date, 0, sizeof(date));
 #endif
+
     for (;;) {
-        read = pread(fd, search_buffer, sizeof(search_buffer), pos);
-        if (read <= 0) {
+        bytes_read = pread(fd, search_buffer, sizeof(search_buffer), pos);
+        if (bytes_read <= 0) {
             return -1;
         }
-        total_bytes_read += read;
-        for (i=0; i < (read - 16); i++) {
+        total_bytes_read += bytes_read;
+        for (i=0; i < (bytes_read - 16); i++) {
             if ((search_buffer[i] == '\n') &&
                 (search_buffer[i+1] != '\t') &&
                 (search_buffer[i+16] == '\t')) {
@@ -58,8 +60,8 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
                 ptr = strptime(&search_buffer[i+1], "%y%m%d%n%T", &conv);
                 if (ptr == (char*)&(search_buffer[i+16])) {
 #ifdef BTSCH_DEBUG
-                    memcpy(date, &search_buffer[i+1], 18);
-                    fprintf(stderr, "ts = %s\n", date);
+                    memcpy(date, &search_buffer[i+1], 15);
+                    fprintf(stderr, "ts = '%s'\n", date);
 #endif
                     ts = mktime(&conv);
                     ts_info->ts = ts;
@@ -69,88 +71,84 @@ int get_next_timestamp(off_t pos, int fd, ts_off_t* ts_info)
                 }
             }
         }
-        pos += search_buffer_size;
+        if (i == 0) {
+            break; // eof
+        }
+        /* use an overlapped read in case we chopped a timestamp on the previous one */
+        pos += i;
     }
+}
+
+
+ts_off_t* search(time_t ts, ts_off_t* ts_info, off_t low, off_t high, int in_fd)
+{
+    off_t    mid = 0;
+    uint64_t total_bytes = 0;
+    int      err;
+
+    for (;;) {
+        mid = (low + high) / 2;
+        if ((mid == low) || (mid == high)) {
+            return (ts_off_t*)NULL;
+        }
+        err = get_next_timestamp(mid, in_fd, ts_info);
+        if (err) {
+            return (ts_off_t*)NULL;
+        }
+        total_bytes += ts_info->bytes;
+        if (ts_info->ts > ts) {
+            high = mid;
+            ts_info->nearest = ts_info->offset;
+            ts_info->nearest_ts = ts_info->ts;
+        } else if (ts_info->ts < ts) {
+            low = mid;
+        } else {
+#ifdef BTSCH_DEBUG
+            fprintf(stderr, "found timestamp at %ld %ld\n", ts_info->offset, total_bytes);
+#endif
+            break;
+        }
+    }
+    return ts_info;
 }
 
 
 int parse_file(time_t start, time_t stop, off_t st_size, int in_fd, FILE* out_f)
 {
-    off_t    mid = 0;
-    off_t    low = 0;
-    off_t    high = st_size;
-    off_t    offset;
-    int      i;
-    int      bytes;
-    int      err;
-    int      read_bytes;
-    uint64_t total_bytes = 0;
-    ts_off_t ts_info;
-    ts_off_t ts_last;
-    ts_off_t ts_start;
+    off_t     offset;
+    int       i;
+    int       bytes;
+    int       read_bytes;
+    uint64_t  total_bytes = 0;
+    ts_off_t  ts_last;
+    ts_off_t  ts_start;
+    ts_off_t* ts_ptr;
 
-    ts_last.ts = 0;
-    ts_last.offset = st_size;
-    ts_start.ts = 0;
+    ts_start.ts = start;
     ts_start.offset = 0;
 
     if (start > 0) {
-        for (;;) {
-            mid = (low + high) / 2;
-            if ((mid == low) || (mid == high)) {
-                fprintf(stderr, "start not found\n");
-                exit(0);
-            }
-            err = get_next_timestamp(mid, in_fd, &ts_info);
-            if (err) {
-                fprintf(stderr, "start not found\n");
-                exit(0);
-            }
-            total_bytes += ts_info.bytes;
-            if (ts_info.ts > start) {
-                high = mid;
-            } else if (ts_info.ts < start) {
-                low = mid;
-            } else {
-#ifdef BTSCH_DEBUG
-                fprintf(stderr, "found timestamp at %ld %ld\n", ts_info.offset, total_bytes);
-#endif
-                ts_start = ts_info;
-                break;
-            }
-        }
-    }
-    low = mid;
-    high = st_size;
-    for (;;) {
-        mid = (low + high) / 2;
-        if ((mid == low) || (mid == high)) {
-            break;
-        }
-        err = get_next_timestamp(mid, in_fd, &ts_info);
-        if (err) {
-            if (ts_last.ts == 0) {
-                fprintf(stderr, "stop not found, using end of file \n");
-            } else {
-                fprintf(stderr, "stop not found, using %ld\n", ts_last.ts);
-            }
-            break;
-        }
-        total_bytes += ts_info.bytes;
-        if (ts_info.ts > stop) {
-            ts_last = ts_info;
-            high = mid;
-        } else if (ts_info.ts < stop) {
-            low = mid;
-        } else {
-#ifdef BTSCH_DEBUG
-            fprintf(stderr, "found stop timestamp at %ld %ld\n", ts_info.offset, total_bytes);
-#endif
-            ts_last = ts_info;
-            break;
+        ts_ptr = search(start, &ts_start, 0, st_size, in_fd);
+        if (ts_ptr == (ts_off_t*)NULL) {
+            fprintf(stderr, "start not found\n");
+            return 1;
         }
     }
 
+    memset(&ts_last, 0, sizeof(ts_last));
+    ts_ptr = search(stop, &ts_last, ts_start.offset, st_size, in_fd);
+    if (ts_ptr == (ts_off_t*)NULL) {
+        ts_last.ts = stop;
+        if ((ts_last.nearest > 0) && (ts_last.nearest < st_size)) {
+            ts_last.offset = ts_last.nearest;
+            fprintf(stderr, "stop not found, using %ld instead\n", ts_last.nearest_ts);
+        } else {
+            ts_last.offset = st_size;
+            fprintf(stderr, "stop not found, using end of file\n");
+        }
+    }
+
+    /* write out requested section */
     total_bytes = ts_last.offset - ts_start.offset;
 #ifdef BTSCH_DEBUG
     fprintf(stderr, "total_bytes = %ld\n", total_bytes);
