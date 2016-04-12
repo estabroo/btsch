@@ -1,6 +1,6 @@
 Pull out sections between timestamps in mysql log files.  btsch uses a binary search to find the timestamps in the log file and then dumps the relevant logs [start, stop)
 
-If no output filename is given it'll dump to stdout.  If you are running the debug version, the debug output is all send to stderr.
+If no output filename is given it'll dump to stdout.  If you are running the debug version, the debug output is all sent to stderr.
 
 
 usage: ./btsch start_time stop_time input_filename [output_filename]
