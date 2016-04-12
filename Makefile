@@ -1,5 +1,5 @@
 SRC=btsch.c
-VERSION=0.2
+VERSION=0.3
 DIST_DIR=btsch-$(VERSION)
 
 btsch: $(SRC)
